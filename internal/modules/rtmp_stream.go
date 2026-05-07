@@ -269,7 +269,7 @@ func rtmpStopCallbackHandler(cb *tg.CallbackQuery) error {
 	rtmpStreamsMu.RUnlock()
 
 	if !exists || stream.State() != tg.StreamStatePlaying {
-		cb.Answer(F(chatID, "room_no_active"), opt)
+		_, _ = cb.Edit(F(chatID, "room_no_active"))
 		return tg.ErrEndGroup
 	}
 
