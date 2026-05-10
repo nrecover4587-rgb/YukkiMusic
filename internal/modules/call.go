@@ -14,7 +14,6 @@
  *
  * Repository: https://github.com/TheTeamVivek/YukkiMusic
  */
-
 package modules
 
 import (
@@ -42,15 +41,18 @@ func streamEndHandler(
 	}
 
 	gologging.DebugF("[onStreamEndHandler] Stream ended in chat %d", chatID)
+
 	ass, err := core.Assistants.ForChat(chatID)
 	if err != nil {
 		gologging.ErrorF("Failed to get Assistant for %d: %v", chatID, err)
 		return
 	}
+
 	r, ok := core.GetRoom(chatID, ass, false)
 	if !ok {
 		return
 	}
+
 	scheduleOldPlayingMessage(r)
 
 	if ok, v := r.GetData("is_transitioning"); ok {
@@ -67,14 +69,36 @@ func streamEndHandler(
 
 	var t *state.Track
 	var wasLooping bool
+
 	if len(r.Queue()) == 0 && r.Loop() == 0 {
-		core.DeleteRoom(chatID)
-		core.Bot.SendMessage(cid, F(cid, "stream_queue_finished"))
-		return
-	} else {
-		wasLooping = r.Loop() > 0
-		t = r.NextTrack()
+		// ── Autoplay: queue khaali hai, related song dhundo ──────────────
+		currentTrack := r.Track()
+		if currentTrack != nil {
+			nextTitle, nextURL, apErr := core.GetAutoPlay(currentTrack.Title)
+			if apErr == nil && nextURL != "" {
+				gologging.DebugF("[autoplay] Related song mila: %s", nextTitle)
+				autoTrack := &state.Track{
+					Title:     nextTitle,
+					URL:       nextURL,
+					Requester: "🎵 AutoPlay",
+				}
+				r.AddTracksToQueue([]*state.Track{autoTrack})
+				// ab neeche normal flow se play hoga
+			} else {
+				gologging.DebugF("[autoplay] Related song nahi mila: %v", apErr)
+				core.DeleteRoom(chatID)
+				core.Bot.SendMessage(cid, F(cid, "stream_queue_finished"))
+				return
+			}
+		} else {
+			core.DeleteRoom(chatID)
+			core.Bot.SendMessage(cid, F(cid, "stream_queue_finished"))
+			return
+		}
 	}
+
+	wasLooping = r.Loop() > 0
+	t = r.NextTrack()
 
 	statusText := F(cid, "stream_downloading_next")
 	if wasLooping && t != nil && r.FilePath() != "" {
@@ -106,7 +130,6 @@ func streamEndHandler(
 			"error": err.Error(),
 		}))
 		core.DeleteRoom(chatID)
-
 		return
 	}
 
@@ -118,7 +141,6 @@ func streamEndHandler(
 		)
 		utils.EOR(statusMsg, F(cid, "stream_play_fail"))
 		core.DeleteRoom(chatID)
-
 		return
 	}
 
