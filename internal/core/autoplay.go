@@ -7,13 +7,19 @@ import (
 	"net/url"
 )
 
+// PipedVideo ek search result represent karta hai
 type PipedVideo struct {
 	Title string `json:"title"`
 	URL   string `json:"url"`
 }
 
-func GetAutoPlay(title string) (string, string, error) {
+// PipedResponse Piped API ka full response
+type PipedResponse struct {
+	Items []PipedVideo `json:"items"`
+}
 
+// GetAutoPlay current song ke title se related next song dhundta hai
+func GetAutoPlay(title string) (string, string, error) {
 	api := fmt.Sprintf(
 		"https://piped.video/api/v1/search?q=%s&filter=videos",
 		url.QueryEscape(title),
@@ -21,22 +27,26 @@ func GetAutoPlay(title string) (string, string, error) {
 
 	resp, err := http.Get(api)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("piped API error: %w", err)
 	}
-
 	defer resp.Body.Close()
 
-	var results []PipedVideo
-
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
-		return "", "", err
+	// ⚠️ Teri original code mein bug tha — Piped response
+	// `{"items": [...]}` format mein aata hai, directly array nahi
+	var result PipedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", "", fmt.Errorf("decode error: %w", err)
 	}
 
-	if len(results) == 0 {
-		return "", "", fmt.Errorf("no results")
+	if len(result.Items) == 0 {
+		return "", "", fmt.Errorf("no results found for: %s", title)
 	}
 
-	return results[0].Title,
-		"https://youtube.com"+results[0].URL,
-		nil
+	// Pehla result lo (index 0 = same song hoga, isliye index 1 lo)
+	next := result.Items[0]
+	if len(result.Items) > 1 {
+		next = result.Items[1]
+	}
+
+	return next.Title, "https://youtube.com" + next.URL, nil
 }
