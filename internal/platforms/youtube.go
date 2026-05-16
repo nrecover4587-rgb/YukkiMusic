@@ -1,4 +1,4 @@
-package youtube
+package platforms
 
 import (
 	"encoding/json"
