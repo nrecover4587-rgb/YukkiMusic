@@ -1,6 +1,7 @@
 package platforms
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/amarnathcjd/gogram/telegram"
 
 	state "main/internal/core/models"
 )
@@ -157,6 +160,105 @@ func NewYouTubeAPI() *YouTubeAPI {
 	}
 }
 
+// Name returns the platform identifier
+func (y *YouTubeAPI) Name() state.PlatformName {
+	return PlatformYouTube
+}
+
+// CanGetTracks returns true if the query is a YouTube URL or a plain search term
+func (y *YouTubeAPI) CanGetTracks(query string) bool {
+	return y.Regex.MatchString(query) || !strings.Contains(query, ".")
+}
+
+// GetTracks fetches track metadata for a YouTube URL or search query
+func (y *YouTubeAPI) GetTracks(query string, video bool) ([]*state.Track, error) {
+	// YouTube URL — get single track via noembed
+	if y.Regex.MatchString(query) {
+		if strings.Contains(query, "&") {
+			query = strings.Split(query, "&")[0]
+		}
+
+		data, err := y.fetchNoembed(query)
+		if err != nil {
+			return nil, err
+		}
+
+		track := noembedToTrack(data, query, video)
+		if track == nil {
+			return nil, fmt.Errorf("failed to extract metadata for: %s", query)
+		}
+		return []*state.Track{track}, nil
+	}
+
+	// Plain search query — use Shruti API
+	return y.searchTracks(query, video)
+}
+
+// searchTracks searches YouTube via Shruti API
+func (y *YouTubeAPI) searchTracks(query string, video bool) ([]*state.Track, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	reqURL := fmt.Sprintf(
+		"%s/search?query=%s&api_key=%s",
+		APIURL,
+		url.QueryEscape(query),
+		url.QueryEscape(APIKEY),
+	)
+
+	resp, err := client.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("search request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("search api returned status %d", resp.StatusCode)
+	}
+
+	var results []VideoResult
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return nil, fmt.Errorf("failed to decode search results: %w", err)
+	}
+
+	tracks := make([]*state.Track, 0, len(results))
+	for _, r := range results {
+		tracks = append(tracks, &state.Track{
+			ID:       r.ID,
+			Title:    r.Title,
+			Duration: TimeToSeconds(r.Duration),
+			Artwork:  r.Thumbnail,
+			URL:      y.Base + r.ID,
+			Video:    video,
+			Source:   PlatformYouTube,
+		})
+	}
+
+	return tracks, nil
+}
+
+// VideoSearch searches for video tracks — used by Spotify and other platforms
+func (y *YouTubeAPI) VideoSearch(query string) ([]*state.Track, error) {
+	return y.searchTracks(query, true)
+}
+
+// CanDownload returns true only for YouTube source tracks
+func (y *YouTubeAPI) CanDownload(source state.PlatformName) bool {
+	return source == PlatformYouTube
+}
+
+// Download downloads a track's audio or video file
+func (y *YouTubeAPI) Download(
+	ctx context.Context,
+	track *state.Track,
+	statusMsg *telegram.NewMessage,
+) (string, error) {
+	if track.Video {
+		return DownloadVideo(track.URL)
+	}
+	return DownloadSong(track.URL)
+}
+
+// Exists checks if a link is a valid YouTube URL
 func (y *YouTubeAPI) Exists(link string, videoID bool) bool {
 	if videoID {
 		link = y.Base + link
@@ -164,19 +266,19 @@ func (y *YouTubeAPI) Exists(link string, videoID bool) bool {
 	return y.Regex.MatchString(link)
 }
 
+// Details fetches raw noembed metadata for a YouTube URL
 func (y *YouTubeAPI) Details(link string, videoID bool) (map[string]interface{}, error) {
 	if videoID {
 		link = y.Base + link
 	}
-
 	if strings.Contains(link, "&") {
 		link = strings.Split(link, "&")[0]
 	}
+	return y.fetchNoembed(link)
+}
 
-	api := fmt.Sprintf(
-		"https://noembed.com/embed?url=%s",
-		url.QueryEscape(link),
-	)
+func (y *YouTubeAPI) fetchNoembed(link string) (map[string]interface{}, error) {
+	api := fmt.Sprintf("https://noembed.com/embed?url=%s", url.QueryEscape(link))
 
 	resp, err := http.Get(api)
 	if err != nil {
@@ -185,61 +287,30 @@ func (y *YouTubeAPI) Details(link string, videoID bool) (map[string]interface{},
 	defer resp.Body.Close()
 
 	var data map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&data)
-	if err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
-
 	return data, nil
 }
 
-func (y *YouTubeAPI) Video(link string, videoID bool) (bool, string) {
-	if videoID {
-		link = y.Base + link
+func noembedToTrack(data map[string]interface{}, link string, video bool) *state.Track {
+	title, _ := data["title"].(string)
+	thumbnail, _ := data["thumbnail_url"].(string)
+
+	if title == "" {
+		return nil
 	}
 
-	if strings.Contains(link, "&") {
-		link = strings.Split(link, "&")[0]
+	videoID := extractVideoID(link)
+
+	return &state.Track{
+		ID:      videoID,
+		Title:   title,
+		Artwork: thumbnail,
+		URL:     link,
+		Video:   video,
+		Source:  PlatformYouTube,
 	}
-
-	file, err := DownloadVideo(link)
-	if err != nil {
-		return false, err.Error()
-	}
-
-	return true, file
-}
-
-func (y *YouTubeAPI) Download(
-	link string,
-	video bool,
-	videoID bool,
-) (string, bool) {
-
-	if videoID {
-		link = y.Base + link
-	}
-
-	var (
-		file string
-		err  error
-	)
-
-	if video {
-		file, err = DownloadVideo(link)
-	} else {
-		file, err = DownloadSong(link)
-	}
-
-	if err != nil {
-		return "", false
-	}
-
-	return file, true
-}
-
-func (y *YouTubeAPI) Name() state.PlatformName {
-	return PlatformYouTube
 }
 
 var (
