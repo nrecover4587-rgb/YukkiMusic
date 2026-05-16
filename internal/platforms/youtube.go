@@ -11,11 +11,15 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	state "main/internal/core/models"
 )
 
+const PlatformYouTube state.PlatformName = "youtube"
+
 var (
-	APIURL     = getEnv("SHRUTI_API_URL", "https://api.shrutibots.site")
-	APIKEY     = getEnv("SHRUTI_API_KEY", "YOUR_API_KEY")
+	APIURL      = getEnv("SHRUTI_API_URL", "https://api.shrutibots.site")
+	APIKEY      = getEnv("SHRUTI_API_KEY", "YOUR_API_KEY")
 	DownloadDir = "downloads"
 )
 
@@ -131,17 +135,12 @@ func extractVideoID(link string) string {
 	return link
 }
 
-func fileExists(filename string) bool {
-	info, err := os.Stat(filename)
-	return err == nil && info.Size() > 0
-}
-
 type VideoResult struct {
-	Title       string `json:"title"`
-	Duration    string `json:"duration"`
-	ID          string `json:"id"`
-	Link        string `json:"link"`
-	Thumbnail   string
+	Title     string `json:"title"`
+	Duration  string `json:"duration"`
+	ID        string `json:"id"`
+	Link      string `json:"link"`
+	Thumbnail string
 }
 
 type YouTubeAPI struct {
@@ -239,7 +238,11 @@ func (y *YouTubeAPI) Download(
 	return file, true
 }
 
-var YouTube = NewYouTubeAPI()
-const PlatformYouTube = "youtube"
+func (y *YouTubeAPI) Name() state.PlatformName {
+	return PlatformYouTube
+}
 
-var yt = YouTube
+var (
+	YouTube = NewYouTubeAPI()
+	yt      = YouTube
+)
