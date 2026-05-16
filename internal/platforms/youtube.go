@@ -560,6 +560,28 @@ func (p *YouTubePlatform) parseNodes(node any, tracks *[]*state.Track, limit int
 	}
 }
 
+// --- Extract helpers ---
+
+func (p *YouTubePlatform) extractPlaylistID(input string) string {
+	if m := playlistIDRe1.FindStringSubmatch(input); len(m) > 1 {
+		return m[1]
+	}
+	if m := playlistIDRe2.FindStringSubmatch(input); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+func (p *YouTubePlatform) extractVideoID(u string) string {
+	if m := videoIDRe1.FindStringSubmatch(u); len(m) > 1 {
+		return m[1]
+	}
+	if m := videoIDRe2.FindStringSubmatch(u); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
 // --- Shared helpers ---
 
 func isLiveVideo(vid map[string]any) bool {
