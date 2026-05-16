@@ -240,3 +240,6 @@ func (y *YouTubeAPI) Download(
 }
 
 var YouTube = NewYouTubeAPI()
+const PlatformYouTube = "youtube"
+
+var yt = YouTube
